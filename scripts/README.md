@@ -1,0 +1,1 @@
+The main purpose of this directory is to have scripts for data exploration, embedding generation and for evaluation against other benchmarks without reinventing the wheel

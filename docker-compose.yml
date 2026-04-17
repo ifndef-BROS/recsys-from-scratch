@@ -1,0 +1,9 @@
+services:
+  recsys:
+    build: .
+    volumes:
+      - .:/app
+    working_dir: /app
+    tty: true
+    ports:
+      - "8080:8080"

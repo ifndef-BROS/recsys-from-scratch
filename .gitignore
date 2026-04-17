@@ -1,0 +1,29 @@
+# CMake build artifacts
+build/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+
+# Data files (too large for git)
+data/
+*.jsonl
+*.jsonl.gz
+*.bin
+*.csv
+*.parquet
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
