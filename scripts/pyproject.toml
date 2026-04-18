@@ -12,4 +12,5 @@ dependencies = [
     "cornac",
     "implicit",
     "tqdm",
+    "psutil>=7.2.2",
 ]
