@@ -44,6 +44,46 @@ Will use `Cornac` or `implicit` to benchmark and not re-invent the wheel
 - [[1603.09320] Efficient and robust approximate nearest neighbor search using Hierarchical Navigable Small World graphs](https://arxiv.org/abs/1603.09320) [5]
 - [1807.05614v2.pdf](https://arxiv.org/pdf/1807.05614)
 
+## Project Structure
+This is till embedding generation stage
+TODO: update later
+```bash
+.
+├── CMakeLists.txt
+├── Dockerfile
+├── README.md
+├── data
+│   ├── embeddings
+│   │   ├── item_embedding_index.csv
+│   │   ├── item_embeddings.csv
+│   │   └── item_embeddings.npy
+│   ├── metadata_Software.jsonl.gz
+│   ├── models
+│   └── reviews_Software.jsonl.gz
+├── docker-compose.yml
+├── include
+├── random_stuff.md
+├── scripts
+│   ├── 00_category_selection.py
+│   ├── 01_download_data.py
+│   ├── 02_check_data.py
+│   ├── 03_filter_data.py
+│   ├── 04_item_embedding.py
+│   ├── README.md
+│   ├── config.py
+│   ├── pyproject.toml
+│   ├── run_scripts.bash
+│   └── uv.lock
+├── src
+│   ├── embeddings
+│   ├── main.cpp
+│   ├── ranking
+│   ├── retrieval
+│   └── utils
+├── tests
+└── todo.md
+```
+
 ## Running the project
 ```bash
 docker-compose build
