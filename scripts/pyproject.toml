@@ -12,4 +12,5 @@ dependencies = [
     "cornac",
     "implicit",
     "tqdm",
+    "pyarrow>=23.0.1",
 ]

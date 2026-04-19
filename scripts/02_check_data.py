@@ -1,15 +1,21 @@
 import pandas as pd
 from pathlib import Path
 from config import DATA_DIR
+import pyarrow.json as paj
 
 # Load reviews
 import psutil, os
 
 process = psutil.Process(os.getpid())
 print(f"Memory: {process.memory_info().rss / 1e9:.2f} GB")
-print("Loading data")
-df = pd.read_json(DATA_DIR / 'reviews_Software.jsonl', 
-                  lines=True)
+# print("Loading data")
+# df = pd.read_json(DATA_DIR / 'reviews_Software.jsonl', 
+#                   lines=True)
+
+table = paj.read_json(DATA_DIR / "reviews_Software.jsonl.gz")
+print(table.schema)
+# print(table)
+df = table.to_pandas()
 print(f"Memory: {process.memory_info().rss / 1e9:.2f} GB")
 
 print("Data loaded")
