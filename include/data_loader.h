@@ -94,7 +94,7 @@ void load_embeddings(
     const string &idx_path,
     embedding_t& embeddings,
     unordered_map<string, int>& asin_to_idx,
-    unordered_map<string, int>& idx_to_asin
+    unordered_map<int, string>& idx_to_asin
 );
 
 

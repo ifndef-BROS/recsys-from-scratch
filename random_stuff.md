@@ -118,3 +118,132 @@ Not all data points are useful for us. The users and items which are useful to u
 - sorting users by timestamps of interactions
 - Kept users with 5+ interactions as lesser the number of interactions, poorer the quality of training and testing set for a user
 - Items with more than 5 unique ratings. For our MVP we are purging less popular items, for which we might have to handle the cold start scenario 
+
+## Designing the Bloom Filter
+The bloom filter has the following parameters:
+- `m`: The size of bit array
+- `k`: Number of hash functions
+We have two more parameters at a higher level of abstraction, which would let us decide the optimal value of `m` and `k` for each user with unique habits.
+- `n`: Number of average items the user looks at
+- `p`: The acceptable false positive rate which we are willing to tolerate (probability of interpretation of not seen items as seen)
+
+According to our stats:
+```
+Avg:  1.9 interactions
+90th: 3
+99th: 12
+Max:  371
+```
+`n` = 2. But this only covers the average user and not everyone. Hence, it would be a better choice to take `n` = 12
+
+Now, given `n` and `p` we can calculate the values of `m` and `k` (refer to the literature below)
+```
+m = -( n × ln(p) ) / (ln(2))²
+
+k =  ( m / n ) × ln(2)
+```
+based on these formulae and assuming `p=0.01` or 1% we get `k=7`
+
+### References for Bloom Filters
+- [im2005b.pdf](https://www.eecs.harvard.edu/~michaelm/postscripts/im2005b.pdf)
+- [/tmp/CS-2002-10.dvi - CS-2002-10.pdf](https://cdn.dal.ca/content/dam/dalhousie/pdf/faculty/computerscience/technical-reports/CS-2002-10.pdf)
+- [1804.04777v2.pdf](https://arxiv.org/pdf/1804.04777)
+- [Less hashing, same performance: Building a better Bloom filter - rsa2008.pdf](https://www.eecs.harvard.edu/~michaelm/postscripts/rsa2008.pdf)
+
+
+## Failing tests
+```bash
+dev@2a1a8724a8f7:/app$ mkdir -p build && cd build && cmake .. && make
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /app/build
+[ 25%] Building CXX object CMakeFiles/main.dir/src/main.cpp.o
+[ 50%] Linking CXX executable bin/main
+[100%] Built target main
+dev@2a1a8724a8f7:/app/build$ cd ..
+dev@2a1a8724a8f7:/app$ ./build/bin/main
+recsys-from-scratch — data loader + bloom filter tests
+
+══════════════════════════════════════
+  1. bloom_params()
+══════════════════════════════════════
+  [PASS] n=2   m in expected range [19,21]
+  [PASS] n=12  m in expected range [114,118]
+  [PASS] n=371 m in expected range [3550,3560]
+  [PASS] n=2   k=7 for p=0.01
+  [PASS] n=12  k=7 for p=0.01
+  [PASS] n=371 k=7 for p=0.01
+  [PASS] p=0.10 → k in [3,4]
+  [PASS] relaxed p → smaller m
+
+══════════════════════════════════════
+  2. BloomFilter insert / query
+══════════════════════════════════════
+[bloom_filter] m=96 bits  k=7  backing=2 uint64 words
+  [PASS] no false negatives on inserted items
+  [INFO] false positives: 0 / 100
+  [PASS] false positive rate under 10% (expected ~1%)
+[bloom_filter] m=48 bits  k=7  backing=1 uint64 words
+[bloom_filter] m=48 bits  k=7  backing=1 uint64 words
+  [PASS] double insert is idempotent
+[bloom_filter] m=48 bits  k=7  backing=1 uint64 words
+  [PASS] empty filter returns false
+[bloom_filter] m=116 bits  k=7  backing=2 uint64 words
+  [PASS] params() returns correct m and k
+[data_loader] embeddings : 89251 items × 384 dims
+[data_loader] train      : 150198 users
+[data_loader] test       : 150198 users
+
+══════════════════════════════════════
+  3. load_embeddings()
+══════════════════════════════════════
+  [PASS] embeddings matrix is non-empty
+  [PASS] asin_to_idx map is non-empty
+  [PASS] idx_to_asin map is non-empty
+  [PASS] asin_to_idx and idx_to_asin have same size
+  [PASS] embedding matrix rows == number of indexed items
+  [PASS] all row indices are within embedding matrix bounds
+  [PASS] asin → idx → asin roundtrip is consistent
+  [PASS] sample embedding is unit-normalised (|norm - 1| < 1e-3)
+  [PASS] no all-zero embedding vectors
+  [INFO] total items: 89251
+  [INFO] sample asin: B0751Q59HC  row: 89250  norm: 1
+
+══════════════════════════════════════
+  4. load_train()
+══════════════════════════════════════
+  [PASS] user_history is non-empty
+  [PASS] all users have >= 5 interactions
+  [PASS] all ratings in [1.0, 5.0]
+  [PASS] no empty ASINs in train history
+  [INFO] users: 150198
+  [INFO] total interactions: 1164101
+  [INFO] avg per user: 7.75044
+  [INFO] max per user: 295
+
+══════════════════════════════════════
+  5. load_test()
+══════════════════════════════════════
+  [PASS] ground_truth is non-empty
+  [PASS] all test users exist in train
+  [FAIL] ground truth item never appears in user train history  (line 301)
+  [PASS] no empty ground truth ASINs
+  [INFO] test users: 150198
+
+══════════════════════════════════════
+  6. End-to-end: real user Bloom filter
+══════════════════════════════════════
+  [INFO] user:            AHZZYDN7XZXJRETMPWW4RRD4PS2Q
+  [INFO] history length:  7
+  [INFO] ground truth:    B075B2RMT2
+[bloom_filter] m=68 bits  k=7  backing=2 uint64 words
+  [PASS] all train items marked seen (no false negatives)
+  [PASS] ground truth item is NOT marked seen
+  [PASS] ground truth item has an embedding
+  [PASS] all train items have embeddings
+
+══════════════════════════════════════
+  Results: 33 passed, 1 failed
+══════════════════════════════════════
+```
+1 test is failing: maybe because of data duplication in the dataset (same millisecond timestamp issue) causing data leak. Investigate dataset and update 03_filtering.py

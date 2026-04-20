@@ -7,6 +7,7 @@ add_executable(
     main
     src/main.cpp
     src/utils/data_loader.cpp
+    src/retrieval/bloom_filter.cpp
 )
 
 target_include_directories(main PRIVATE include)
