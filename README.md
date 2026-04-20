@@ -45,6 +45,7 @@ Will use `Cornac` or `implicit` to benchmark and not re-invent the wheel
 - [1807.05614v2.pdf](https://arxiv.org/pdf/1807.05614)
 
 ## Project Structure
+Note: We will be using Javadoc headers style comments to make it more clear and referencable in the future
 This is till embedding generation stage
 TODO: update later
 ```bash
