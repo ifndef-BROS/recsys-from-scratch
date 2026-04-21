@@ -92,6 +92,6 @@ docker-compose up -d
 docker-compose exec recsys bash
 ```
 ```bash
-mkdir -p build && cd build && cmake .. && make
+mkdir -p build && cd build && cmake .. && make && cd ..
 ./bin/main
 ```

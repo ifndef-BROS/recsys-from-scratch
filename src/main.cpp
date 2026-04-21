@@ -17,6 +17,7 @@
 #include "data_loader.h"
 #include "bloom_filter.h"
 #include "user_embedding.h"
+#include "kdtree.h"
 
 #include <iostream>
 #include <cassert>
@@ -25,6 +26,8 @@
 #include <vector>
 #include <unordered_set>
 #include <numeric>
+#include <unordered_set>
+#include <algorithm>
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -466,6 +469,84 @@ static void test_user_embedding(
     std::cout << "  [INFO] total users embedded: " << all_vecs.size()<< "\n";
 }
 
+static void test_kdtree(
+    const std::vector<embedding_t>& embeddings,
+    const std::unordered_map<std::string, std::array<float, DIM>>& user_embeddings,
+    const std::unordered_map<std::string, int>& asin_to_idx
+) {
+    print_section("8. KDTree build + query");
+
+    // ── 8a. Build ──────────────────────────────────────────────────────────
+    KDTree tree(embeddings);
+    CHECK(tree.size() == static_cast<int>(embeddings.size()),
+          "tree indexes all items");
+
+    // ── 8b. Self-query — every item's nearest neighbour should be itself ───
+    // Pick 10 random items and query the tree with their own embedding
+    int correct_self = 0;
+    for (int i = 0; i < 10; i++) {
+        int row = (i * 1337) % embeddings.size();  // deterministic spread
+        auto results = tree.query(embeddings[row], 1);
+        if (!results.empty() && results[0].row == row)
+            ++correct_self;
+    }
+    CHECK(correct_self == 10, "self-query returns item itself as nearest neighbour");
+
+    // ── 8c. Result count ───────────────────────────────────────────────────
+    auto sample_user = user_embeddings.begin();
+    auto results = tree.query(sample_user->second, 50);
+    CHECK(static_cast<int>(results.size()) == 50, "query returns exactly k results");
+
+    // ── 8d. Results are sorted by distance ascending ───────────────────────
+    bool sorted = true;
+    for (int i = 1; i < static_cast<int>(results.size()); i++)
+        if (results[i].squared_dist < results[i-1].squared_dist)
+            { sorted = false; break; }
+    CHECK(sorted, "results are sorted by distance ascending");
+
+    // ── 8e. Recall vs brute force ──────────────────────────────────────────
+    // For a sample of users, compare KD-tree top-50 against brute force top-50
+    // A good KD-tree should retrieve >= 80% of the true nearest neighbours
+    int total_retrieved = 0;
+    int total_expected  = 0;
+    int users_checked   = 0;
+    int K               = 50;
+
+    for (auto& [uid, user_vec] : user_embeddings) {
+        if (users_checked++ >= 100) break;  // check 100 users
+
+        // Brute force top-K
+        std::vector<KNNResult> bf_results;
+        bf_results.reserve(embeddings.size());
+        for (int r = 0; r < static_cast<int>(embeddings.size()); r++)
+            bf_results.push_back({r, squared_l2_free(user_vec, embeddings[r])});
+        std::sort(bf_results.begin(), bf_results.end(),
+                  [](const KNNResult& a, const KNNResult& b) {
+                      return a.squared_dist < b.squared_dist; });
+        bf_results.resize(K);
+
+        // KD-tree top-K
+        auto kd_results = tree.query(user_vec, K);
+
+        // Count overlap
+        std::unordered_set<int> bf_set;
+        for (auto& r : bf_results) bf_set.insert(r.row);
+        for (auto& r : kd_results)
+            if (bf_set.count(r.row)) ++total_retrieved;
+
+        total_expected += K;
+    }
+
+    float recall = static_cast<float>(total_retrieved) / total_expected;
+    std::cout << "  [INFO] KD-tree recall vs brute force (k=50, 100 users): "
+              << recall * 100.0f << "%\n";
+
+    // At 384 dims recall may be low — acceptable, note in report
+    CHECK(recall >= 0.5f, "KD-tree recall vs brute force >= 50%");
+
+    std::cout << "  [INFO] total items in tree: " << tree.size() << "\n";
+}
+
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
@@ -504,6 +585,10 @@ int main() {
     test_end_to_end(user_history, ground_truth, asin_to_idx);
     auto user_embeddings = compute_all_user_embeddings(user_history, embeddings, asin_to_idx);
     test_user_embedding(user_history, embeddings, asin_to_idx);
+
+    // KD Tree
+    KDTree tree(embeddings);
+    test_kdtree(embeddings, user_embeddings, asin_to_idx);
 
     // ── Summary ────────────────────────────────────────────────────────────
     std::cout << "\n══════════════════════════════════════\n";

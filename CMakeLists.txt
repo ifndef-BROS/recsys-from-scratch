@@ -8,6 +8,7 @@ add_executable(
     src/main.cpp
     src/utils/data_loader.cpp
     src/retrieval/bloom_filter.cpp
+    src/retrieval/kdtree.cpp 
     src/embeddings/user_embedding.cpp
 )
 
