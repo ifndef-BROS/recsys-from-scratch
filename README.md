@@ -53,34 +53,52 @@ TODO: update later
 ├── CMakeLists.txt
 ├── Dockerfile
 ├── README.md
+├── bug_logs.md
 ├── data
-│   ├── embeddings
-│   │   ├── item_embedding_index.csv
-│   │   ├── item_embeddings.csv
-│   │   └── item_embeddings.npy
-│   ├── metadata_Software.jsonl.gz
-│   ├── models
-│   └── reviews_Software.jsonl.gz
+│   ├── embeddings
+│   │   ├── item_embedding_index.csv
+│   │   ├── item_embeddings.csv
+│   │   └── item_embeddings.npy
+│   ├── meta_Software.jsonl
+│   ├── metadata_Software.jsonl.gz
+│   ├── models
+│   ├── reviews_Software.jsonl
+│   ├── reviews_Software.jsonl.gz
+│   ├── test.csv
+│   └── train.csv
 ├── docker-compose.yml
 ├── include
+│   ├── bloom_filter.h
+│   ├── data_loader.h
+│   ├── kdtree.h
+│   └── user_embedding.h
 ├── random_stuff.md
 ├── scripts
-│   ├── 00_category_selection.py
-│   ├── 01_download_data.py
-│   ├── 02_check_data.py
-│   ├── 03_filter_data.py
-│   ├── 04_item_embedding.py
-│   ├── README.md
-│   ├── config.py
-│   ├── pyproject.toml
-│   ├── run_scripts.bash
-│   └── uv.lock
+│   ├── 00_category_selection.py
+│   ├── 01_download_data.py
+│   ├── 02_check_data.py
+│   ├── 03_filter_data.py
+│   ├── 04_item_embedding.py
+│   ├── README.md
+│   ├── __pycache__
+│   │   ├── config.cpython-312.pyc
+│   │   └── config.cpython-314.pyc
+│   ├── config.py
+│   ├── issue_01_investigating_data_leak.py
+│   ├── main.py
+│   ├── pyproject.toml
+│   ├── run_scripts.bash
+│   └── uv.lock
 ├── src
-│   ├── embeddings
-│   ├── main.cpp
-│   ├── ranking
-│   ├── retrieval
-│   └── utils
+│   ├── embeddings
+│   │   └── user_embedding.cpp
+│   ├── main.cpp
+│   ├── ranking
+│   ├── retrieval
+│   │   ├── bloom_filter.cpp
+│   │   └── kdtree.cpp
+│   └── utils
+│       └── data_loader.cpp
 ├── tests
 └── todo.md
 ```
