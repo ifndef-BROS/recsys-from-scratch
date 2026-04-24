@@ -150,6 +150,9 @@ based on these formulae and assuming `p=0.01` or 1% we get `k=7`
 - [1804.04777v2.pdf](https://arxiv.org/pdf/1804.04777)
 - [Less hashing, same performance: Building a better Bloom filter - rsa2008.pdf](https://www.eecs.harvard.edu/~michaelm/postscripts/rsa2008.pdf)
 
+### References for KDTree
+- [Algorithms for calculating variance - Wikipedia](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance). This page has some rather interesting ways to calculate variance. I found it while looking for cache friendly ways to calculate variance. But found numerically stable ones instead.
+
 
 ## Failing tests
 ```bash

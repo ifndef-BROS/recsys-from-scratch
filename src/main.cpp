@@ -519,7 +519,7 @@ static void test_kdtree(
         std::vector<KNNResult> bf_results;
         bf_results.reserve(embeddings.size());
         for (int r = 0; r < static_cast<int>(embeddings.size()); r++)
-            bf_results.push_back({r, squared_l2_free(user_vec, embeddings[r])});
+            bf_results.push_back({r, squared_l2(user_vec, embeddings[r])});
         std::sort(bf_results.begin(), bf_results.end(),
                   [](const KNNResult& a, const KNNResult& b) {
                       return a.squared_dist < b.squared_dist; });

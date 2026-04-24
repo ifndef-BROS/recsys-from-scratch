@@ -3,26 +3,29 @@
  * @brief   Implementation of KD-tree nearest neighbour search.
  *
  * Build strategy:
- *   1. Find highest-variance dimension among current points
- *   2. Sort points by that dimension
- *   3. Split on median — left gets lower half, right gets upper half
+ *   1. Find highest-variance dimension (Welford's, cache-friendly gather)
+ *   2. Sort points by that dimension — O(n log n)
+ *   3. Split on median → balanced tree, O(log n) depth
  *   4. Recurse until node has <= LEAF_SIZE points
  *
  * Search strategy:
- *   1. Traverse to the leaf the query point falls in
+ *   1. Traverse to the leaf the query point falls in (near subtree first)
  *   2. Check all leaf points, push candidates onto max-heap of size k
- *   3. Backtrack — for each internal node, check if the opposite
- *      subtree's splitting hyperplane is closer than heap's worst result
- *   4. If yes, search that subtree too. If no, prune it.
+ *   3. Backtrack — check if splitting hyperplane is closer than heap's worst
+ *   4. If yes → search far subtree. If no → prune it.
  *
- * Pruning condition:
- *   dist_to_hyperplane² = (query[split_dim] - split_val)²
- *   If dist_to_hyperplane² >= heap.top().squared_dist → prune
+ * Why max-heap of size k:
+ *   We want to evict the worst candidate when a better one is found.
+ *   Max-heap keeps the worst result at top → O(log k) eviction.
+ *   At the end we drain and reverse-sort for ascending distance output.
  *
- * Note on high dimensionality:
- *   At 384 dims, dist_to_hyperplane is almost always < heap.top().squared_dist
- *   because points are spread across many dimensions. Pruning rarely fires.
- *   Apply PCA before building to restore meaningful pruning.
+ * Row-major vs column-major tradeoff:
+ *   Row-major (current): query distance computation is sequential (Yes)
+ *                        variance gather is random access (No)
+ *   Column-major:        variance gather is sequential (Yes)
+ *                        query distance computation is random access (No)
+ *   Query runs O(n_users × k × log n) times vs build runs once.
+ *   Row-major wins overall.
  */
 
 #include "kdtree.h"
@@ -30,80 +33,105 @@
 #include <numeric>
 #include <cmath>
 #include <iostream>
-#include <cassert>
-#include <memory>
 
-using std::vector,
-    std::move,
-    std::unique_ptr,
-    std::make_unique,
-    std::sort,
-    std::cout,
-    std::priority_queue,
-    std::iota;
+// ---------------------------------------------------------------------------
+// Constructor
+// ---------------------------------------------------------------------------
 
-KDTree::KDTree(const vector<embedding_t>& embeddings) : embeddings_(embeddings) {
-    // Build index over all rows
-    vector<int> all_indices(embeddings.size());
-    iota(all_indices.begin(), all_indices.end(), 0); // fill 0, 1, 2... n-1
+KDTree::KDTree(const std::vector<embedding_t>& embeddings)
+    : embeddings_(embeddings)
+{
+    // Build index over all item rows
+    std::vector<int> all_indices(embeddings.size());
+    std::iota(all_indices.begin(), all_indices.end(), 0);  // 0, 1, 2, ..., n-1
 
-    root_ = build(move(all_indices)); // understand this and xvalues in cpp
+    root_ = build(std::move(all_indices));
 
-    cout << "[kdtree] built over " << embeddings.size() << " items"
+    std::cout << "[kdtree] built over " << embeddings.size() << " items"
               << "  leaf_size=" << LEAF_SIZE << "\n";
 }
 
-unique_ptr<KDTree::Node> KDTree::build(vector<int> indices) {
-    auto node = make_unique<Node>();
 
-    // Base case — small enough to search exhaustively
+std::unique_ptr<KDTree::Node> KDTree::build(std::vector<int> indices) {
+    auto node = std::make_unique<Node>();
+
+    // Base case — small enough to search exhaustively at query time
     if (static_cast<int>(indices.size()) <= LEAF_SIZE) {
-        node->indices = move(indices);
+        node->indices   = std::move(indices);
         node->split_dim = -1;
         node->split_val = 0.0f;
         return node;
     }
 
-    // Find dimension with highest variance — best split axis
+    // Find best split dimension — highest variance separates points most
     node->split_dim = highest_variance_dim(indices);
 
-    // Sort indices by the split dimension
-    sort(indices.begin(), indices.end(), [&](int a, int b) {
+    // Sort by split dimension — O(n log n)
+    // After sort, median element gives a balanced split
+    std::sort(indices.begin(), indices.end(), [&](int a, int b) {
         return embeddings_[a][node->split_dim] < embeddings_[b][node->split_dim];
     });
 
-    // Split on median — left gets lower half, right gets upper half
-    // Median index ensures balanced tree → O(log n) depth
-    int median     = static_cast<int>(indices.size()) / 2;
+    // Split on median — guarantees balanced tree → O(log n) depth
+    int median      = static_cast<int>(indices.size()) / 2;
     node->split_val = embeddings_[indices[median]][node->split_dim];
 
-    // Partition into left and right
-    vector<int> right_idx(indices.begin() + median, indices.end());
-    vector<int> left_idx (indices.begin(), indices.begin() + median);
+    // Partition: left gets [0, median), right gets [median, n)
+    std::vector<int> left_idx (indices.begin(), indices.begin() + median);
+    std::vector<int> right_idx(indices.begin() + median, indices.end());
 
-    node->left  = build(move(left_idx));
-    node->right = build(move(right_idx));
+    node->left  = build(std::move(left_idx));
+    node->right = build(std::move(right_idx));
 
     return node;
 }
 
-int KDTree::highest_variance_dim(const vector<int>& indices) const {
-    int   best_dim  = 0;
-    float best_var  = -1.0f;
+int KDTree::highest_variance_dim(const std::vector<int>& indices) const {
+    int   best_dim = 0;
+    float best_var = -1.0f;
+    int   n        = static_cast<int>(indices.size());
+
+    // Contiguous buffer — Welford pass reads this sequentially
+    // Allocated once per call, reused across all DIM iterations
+    std::vector<float> dim_vals(n);
 
     for (int d = 0; d < DIM; d++) {
-        // Compute mean along dim d
-        float mean = 0.0f;
-        for (int idx : indices)
-            mean += embeddings_[idx][d];
-        mean /= static_cast<float>(indices.size());
 
-        // Compute variance along dim d
-        float var = 0.0f;
-        for (int idx : indices) {
-            float diff = embeddings_[idx][d] - mean;
-            var += diff * diff;
+        // Phase 1: Gather 
+        // Pack all values for dim d into contiguous buffer.
+        // Access pattern: embeddings_[random_row][d] — unavoidably random.
+        // Separating this from compute means the Welford pass is fully sequential.
+        for (int i = 0; i < n; i++)
+            dim_vals[i] = embeddings_[indices[i]][d];
+
+        // Phase 2: Welford's online mean + variance (single pass) 
+        //
+        // Standard two-pass formula:
+        //   pass 1: mean = Σx / n
+        //   pass 2: var  = Σ(x - mean)² / n
+        //
+        // Welford's recurrence (Welford 1962, Knuth TAOCP Vol.2 §4.2.2):
+        //   delta  = x - mean_prev
+        //   mean  += delta / (i + 1)
+        //   delta2 = x - mean_new        ← uses UPDATED mean, key to stability
+        //   M2    += delta * delta2
+        //   var    = M2 / n
+        //
+        // For unit-normalised embeddings in [-1,1], numerical stability is
+        // not a practical concern — Welford's is used for its single-pass
+        // property (n iterations vs 2n) and principled general correctness.
+        float mean = 0.0f;
+        float M2   = 0.0f;
+
+        for (int i = 0; i < n; i++) {
+            float x      = dim_vals[i];
+            float delta  = x - mean;
+            mean        += delta / static_cast<float>(i + 1);
+            float delta2 = x - mean;     // note: mean is already updated
+            M2          += delta * delta2;
         }
+
+        float var = M2 / static_cast<float>(n);
 
         if (var > best_var) {
             best_var = var;
@@ -114,21 +142,22 @@ int KDTree::highest_variance_dim(const vector<int>& indices) const {
     return best_dim;
 }
 
-vector<KNNResult> KDTree::query(const embedding_t& query, int k) const {
+std::vector<KNNResult> KDTree::query(const embedding_t& query, int k) const {
     // Max-heap — worst result (largest distance) at top
-    // Lets us efficiently check if a new candidate beats the current worst
-    priority_queue<KNNResult, vector<KNNResult>, KNNComparator> heap;
+    // When heap is full and we find a better candidate:
+    //   pop worst → push new → O(log k)
+    std::priority_queue<KNNResult, std::vector<KNNResult>, KNNComparator> heap;
 
     search(root_.get(), query, k, heap);
 
-    // Drain heap into sorted vector (closest first)
-    vector<KNNResult> results;
+    // Drain heap into vector and sort ascending (closest first)
+    std::vector<KNNResult> results;
     results.reserve(heap.size());
     while (!heap.empty()) {
         results.push_back(heap.top());
         heap.pop();
     }
-    sort(results.begin(), results.end(), [](const KNNResult& a, const KNNResult& b) {
+    std::sort(results.begin(), results.end(), [](const KNNResult& a, const KNNResult& b) {
         return a.squared_dist < b.squared_dist;
     });
 
@@ -139,20 +168,20 @@ void KDTree::search(
     const Node* node,
     const embedding_t& query,
     int k,
-    priority_queue<KNNResult, vector<KNNResult>, KNNComparator>& heap
+    std::priority_queue<KNNResult, std::vector<KNNResult>, KNNComparator>& heap
 ) const {
     if (node == nullptr) return;
 
-    // Leaf node — check all points exhaustively 
+    // Leaf node — exhaustive check 
     if (node->is_leaf()) {
         for (int idx : node->indices) {
             float dist = squared_l2(query, embeddings_[idx]);
 
             if (static_cast<int>(heap.size()) < k) {
-                // Heap not full yet — always add
+                // Heap not full — always add
                 heap.push({idx, dist});
             } else if (dist < heap.top().squared_dist) {
-                // Better than current worst — replace it
+                // Better than current worst — evict worst, add new
                 heap.pop();
                 heap.push({idx, dist});
             }
@@ -161,34 +190,26 @@ void KDTree::search(
     }
 
     // Internal node — traverse closer subtree first 
-    float diff = query[node->split_dim] - node->split_val;
+    // The subtree on the same side as the query is more likely to contain
+    // nearest neighbours — searching it first fills the heap faster,
+    // making pruning of the far subtree more likely to trigger
+    float diff      = query[node->split_dim] - node->split_val;
+    const Node* near = (diff <= 0) ? node->left.get()  : node->right.get();
+    const Node* far  = (diff <= 0) ? node->right.get() : node->left.get();
 
-    // The subtree on the same side as the query point is more likely
-    // to contain nearest neighbours — search it first
-    const Node* near_node = (diff <= 0) ? node->left.get()  : node->right.get();
-    const Node* far_node  = (diff <= 0) ? node->right.get() : node->left.get();
+    search(near, query, k, heap);
 
-    search(near_node, query, k, heap);
-
-    // Pruning check
-    // Distance from query to the splitting hyperplane (squared)
-    // If this is >= our current worst result, the far subtree cannot
-    // contain a closer point — prune it entirely
+    // Pruning
+    // The closest point in the far subtree is at least |diff| away
+    // along the split dimension. If diff² >= current worst distance,
+    // no point in the far subtree can beat our current k results → prune.
+    //
+    // At high dims (384) this rarely triggers — most far subtrees are
+    // searched, degrading toward O(n). PCA to 64 dims restores pruning.
     float dist_to_plane = diff * diff;
+    bool  heap_full     = static_cast<int>(heap.size()) >= k;
+    bool  can_prune     = heap_full && (dist_to_plane >= heap.top().squared_dist);
 
-    bool heap_full       = static_cast<int>(heap.size()) >= k;
-    bool plane_too_far   = heap_full && (dist_to_plane >= heap.top().squared_dist);
-
-    if (!plane_too_far)
-        search(far_node, query, k, heap);
-}
-
-
-float KDTree::squared_l2(const embedding_t& a, const embedding_t& b) const {
-    float dist = 0.0f;
-    for (int d = 0; d < DIM; d++) {
-        float diff = a[d] - b[d];
-        dist += diff * diff;
-    }
-    return dist;
+    if (!can_prune)
+        search(far, query, k, heap);
 }
