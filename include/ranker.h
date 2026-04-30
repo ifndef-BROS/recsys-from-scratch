@@ -39,7 +39,7 @@
  *   reranking for reordering documents and producing summaries. SIGIR.
  *
  * @author  anshulbadhani
- * @date    30/4/2026
+ * @date    30/04/2026
  */
 
 #pragma once

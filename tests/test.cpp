@@ -1,10 +1,17 @@
 /**
+ * AI-Generated
  * @file    main.cpp
- * @brief   Entry point — runs tests then full pipeline inference.
+ * @brief   Integration test for data loading and Bloom filter.
  *
- * Modes:
- *   No args      → run all component tests then full pipeline on test set
- *   --user <id>  → recommend for a single user and print results
+ * Tests (in order):
+ *   1. bloom_params()   — formula correctness against known values
+ *   2. BloomFilter      — insert / probably_seen / no false negatives
+ *   3. load_embeddings  — matrix shape, lookup maps, vector sanity
+ *   4. load_train       — user count, history integrity
+ *   5. load_test        — ground truth count, no train leakage
+ *   6. End-to-end       — build a Bloom filter from a real user's history,
+ *                         confirm all their train items are marked seen,
+ *                         confirm their test item is NOT marked seen
  */
 
 #include "data_loader.h"
@@ -12,22 +19,29 @@
 #include "user_embedding.h"
 #include "kdtree.h"
 #include "ranker.h"
-#include "pipeline.h"
-#include "config.h"
 
 #include <iostream>
 #include <cassert>
 #include <cmath>
 #include <string>
 #include <vector>
-#include <unordered_map>
 #include <unordered_set>
 #include <numeric>
+#include <unordered_set>
+#include <algorithm>
 
-// ── Test helpers ───────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 static int passed = 0;
 static int failed = 0;
 
+/**
+ * @brief Prints PASS/FAIL and updates counters.
+ *
+ * Using a macro so __LINE__ points to the call site, not this function.
+ */
 #define CHECK(cond, msg)                                              \
     do {                                                              \
         if (cond) {                                                   \
@@ -45,6 +59,10 @@ static void print_section(const std::string& title) {
     std::cout << "  " << title << "\n";
     std::cout << "══════════════════════════════════════\n";
 }
+
+// ---------------------------------------------------------------------------
+// Test 1 — bloom_params formula
+// ---------------------------------------------------------------------------
 
 static void test_bloom_params() {
     print_section("1. bloom_params()");
@@ -629,93 +647,59 @@ static void test_ranker(
               << "  score: " << mmr_results[0].score << "\n";
 }
 
-// ── main ───────────────────────────────────────────────────────────────────
-int main(int argc, char* argv[]) {
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
 
-    // ── Load data ──────────────────────────────────────────────────────────
-    std::vector<embedding_t>                                  embeddings;
+int main() {
+    std::cout << "recsys-from-scratch — data loader + bloom filter tests\n";
+
+    // ── Tests that need no data files ──────────────────────────────────────
+    test_bloom_params();
+    test_bloom_filter();
+
+    // ── Load data files ────────────────────────────────────────────────────
+    std::vector<std::array<float, DIM>>                       embeddings;
     std::unordered_map<std::string, int>                      asin_to_idx;
     std::unordered_map<int, std::string>                      idx_to_asin;
     std::unordered_map<std::string, std::vector<Interaction>> user_history;
     std::unordered_map<std::string, std::string>              ground_truth;
 
     try {
-        load_embeddings(EMBEDDINGS_DIR "/item_embeddings.csv",
-                        EMBEDDINGS_DIR "/item_embedding_index.csv",
+        load_embeddings("data/embeddings/item_embeddings.csv",
+                        "data/embeddings/item_embedding_index.csv",
                         embeddings, asin_to_idx, idx_to_asin);
-        load_train(DATA_DIR "/train.csv", user_history);
-        load_test (DATA_DIR "/test.csv",  ground_truth);
+
+        load_train("data/train.csv", user_history);
+        load_test ("data/test.csv",  ground_truth);
     } catch (const std::exception& e) {
-        std::cerr << "[ERROR] " << e.what() << "\n";
+        std::cerr << "\n[ERROR] Failed to load data: " << e.what() << "\n";
+        std::cerr << "        Make sure data files exist and paths are correct.\n";
         return 1;
     }
 
-    // ── Single user mode ───────────────────────────────────────────────────
-    if (argc == 3 && std::string(argv[1]) == "--user") {
-        std::string user_id = argv[2];
-
-        PipelineConfig cfg;
-        cfg.candidate_pool = 500;
-        cfg.top_k          = 10;
-        cfg.mmr            = {1.0f, 0.2f};
-
-        Pipeline pipeline(embeddings, asin_to_idx, idx_to_asin,
-                          user_history, cfg);
-        pipeline.single_user(user_id);
-        return 0;
-    }
-
-    // ── Test mode (default) ────────────────────────────────────────────────
-    std::cout << "recsys-from-scratch — component tests\n";
-
-    test_bloom_params();
-    test_bloom_filter();
+    // ── Tests that need data files ─────────────────────────────────────────
     test_load_embeddings(embeddings, asin_to_idx, idx_to_asin);
     test_load_train(user_history);
     test_load_test(ground_truth, user_history);
     test_end_to_end(user_history, ground_truth, asin_to_idx);
-
-    auto user_embeddings = compute_all_user_embeddings(
-        user_history, embeddings, asin_to_idx);
-
+    auto user_embeddings = compute_all_user_embeddings(user_history, embeddings, asin_to_idx);
     test_user_embedding(user_history, embeddings, asin_to_idx);
 
+    // KD Tree
     KDTree tree(embeddings);
     test_kdtree(embeddings, user_embeddings, asin_to_idx);
 
+    // Ranker
     Ranker ranker(embeddings);
     test_ranker(embeddings, user_embeddings, tree);
 
-    // ── Test summary ───────────────────────────────────────────────────────
+    // ── Summary ────────────────────────────────────────────────────────────
     std::cout << "\n══════════════════════════════════════\n";
-    std::cout << "  Results: " << passed << " passed, " << failed << " failed\n";
+    std::cout << "  Results: "
+              << passed << " passed, "
+              << failed << " failed\n";
     std::cout << "══════════════════════════════════════\n";
 
-    if (failed > 0) return 1;
-
-    // ── Full pipeline — all test users ────────────────────────────────────
-    std::cout << "\n══════════════════════════════════════\n";
-    std::cout << "  Full pipeline inference\n";
-    std::cout << "══════════════════════════════════════\n";
-
-    PipelineConfig cfg;
-    cfg.candidate_pool = 500;
-    cfg.top_k          = 10;
-    cfg.mmr            = {1.0f, 0.2f};
-
-    Pipeline pipeline(embeddings, asin_to_idx, idx_to_asin, user_history, cfg);
-
-    pipeline.all_users(
-        ground_truth,
-        DATA_DIR "/results_cosine.csv",
-        DATA_DIR "/results_mmr.csv"
-    );
-
-    std::cout << "\nResults saved to:\n"
-              << "  " DATA_DIR "/results_cosine.csv\n"
-              << "  " DATA_DIR "/results_mmr.csv\n"
-              << "\nRun evaluation script next:\n"
-              << "  cd scripts && uv run python 05_evaluate.py\n";
-
-    return 0;
+    return failed == 0 ? 0 : 1;
 }

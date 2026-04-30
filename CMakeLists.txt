@@ -11,6 +11,7 @@ add_executable(
     src/retrieval/kdtree.cpp 
     src/embeddings/user_embedding.cpp
     src/ranking/ranker.cpp
+    src/pipeline.cpp
 )
 
 target_include_directories(main PRIVATE include)
