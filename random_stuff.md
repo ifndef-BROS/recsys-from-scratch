@@ -153,6 +153,9 @@ based on these formulae and assuming `p=0.01` or 1% we get `k=7`
 ### References for KDTree
 - [Algorithms for calculating variance - Wikipedia](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance). This page has some rather interesting ways to calculate variance. I found it while looking for cache friendly ways to calculate variance. But found numerically stable ones instead.
 
+### Ranker
+The key implementation detail worth noting for your report is the max_sim_to_selected incremental update at the bottom of the MMR loop. Instead of recomputing similarity from all selected items for all candidates at every iteration — which would be O(n·k²·DIM) — you only update using the newly selected item, keeping it at O(n·k·DIM). This is the standard MMR optimisation and worth one sentence in the complexity analysis.
+
 
 ## Failing tests
 ```bash

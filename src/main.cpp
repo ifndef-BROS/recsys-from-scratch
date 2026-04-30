@@ -18,6 +18,7 @@
 #include "bloom_filter.h"
 #include "user_embedding.h"
 #include "kdtree.h"
+#include "ranker.h"
 
 #include <iostream>
 #include <cassert>
@@ -547,6 +548,105 @@ static void test_kdtree(
     std::cout << "  [INFO] total items in tree: " << tree.size() << "\n";
 }
 
+static void test_ranker(
+    const std::vector<embedding_t>& embeddings,
+    const std::unordered_map<std::string, std::array<float, DIM>>& user_embeddings,
+    const KDTree& tree
+) {
+    print_section("9. Ranker — cosine sort + Adaptive MMR");
+
+    Ranker ranker(embeddings);
+    int K = 10;
+
+    // Pick a sample user
+    auto& [uid, user_vec] = *user_embeddings.begin();
+
+    // Get candidates from KD-tree
+    auto candidates = tree.query(user_vec, 100);
+    CHECK(!candidates.empty(), "KD-tree returned candidates");
+
+    // ── 9a. Cosine sort ────────────────────────────────────────────────────
+    auto cosine_results = ranker.cosine_sort(user_vec, candidates, K);
+
+    CHECK(static_cast<int>(cosine_results.size()) == K,
+          "cosine sort returns exactly K results");
+
+    // Scores should be descending
+    bool cosine_sorted = true;
+    for (int i = 1; i < static_cast<int>(cosine_results.size()); i++)
+        if (cosine_results[i].score > cosine_results[i-1].score)
+            { cosine_sorted = false; break; }
+    CHECK(cosine_sorted, "cosine sort results are in descending score order");
+
+    // Scores should be in [-1, 1] (cosine similarity range)
+    bool cosine_range = true;
+    for (auto& r : cosine_results)
+        if (r.score < -1.0f || r.score > 1.0f)
+            { cosine_range = false; break; }
+    CHECK(cosine_range, "cosine scores are in [-1, 1]");
+
+    // ── 9b. Adaptive MMR ───────────────────────────────────────────────────
+    MMRConfig cfg{1.0f, 0.2f};
+    auto mmr_results = ranker.adaptive_mmr(user_vec, candidates, K, cfg);
+
+    CHECK(static_cast<int>(mmr_results.size()) == K,
+          "adaptive MMR returns exactly K results");
+
+    // No duplicate items in MMR results
+    std::unordered_set<int> seen_rows;
+    bool no_dupes = true;
+    for (auto& r : mmr_results)
+        if (!seen_rows.insert(r.row).second)
+            { no_dupes = false; break; }
+    CHECK(no_dupes, "adaptive MMR returns no duplicate items");
+
+    // ── 9c. Special cases ──────────────────────────────────────────────────
+    // decay=0, lambda=1.0 → should match cosine sort order
+    MMRConfig cosine_cfg{1.0f, 0.0f};
+    auto mmr_as_cosine = ranker.adaptive_mmr(user_vec, candidates, K, cosine_cfg);
+
+    bool matches_cosine = true;
+    for (int i = 0; i < K; i++)
+        if (mmr_as_cosine[i].row != cosine_results[i].row)
+            { matches_cosine = false; break; }
+    CHECK(matches_cosine, "MMR with decay=0 lambda=1 matches cosine sort order");
+
+    // ── 9d. Diversity check ────────────────────────────────────────────────
+    // MMR with high decay should produce more diverse results than cosine sort
+    // Measure: average pairwise similarity between selected items
+    // Lower avg similarity = more diverse
+    auto avg_pairwise_sim = [&](const std::vector<RankedItem>& items) {
+        float total = 0.0f;
+        int   count = 0;
+        for (int i = 0; i < static_cast<int>(items.size()); i++)
+            for (int j = i + 1; j < static_cast<int>(items.size()); j++) {
+                total += squared_l2(embeddings[items[i].row], embeddings[items[j].row]);
+                ++count;
+            }
+        return count > 0 ? total / count : 0.0f;
+    };
+
+    // High decay MMR — should be more diverse (higher avg pairwise distance)
+    MMRConfig diverse_cfg{1.0f, 0.5f};
+    auto mmr_diverse = ranker.adaptive_mmr(user_vec, candidates, K, diverse_cfg);
+
+    float cosine_diversity = avg_pairwise_sim(cosine_results);
+    float mmr_diversity    = avg_pairwise_sim(mmr_diverse);
+
+    std::cout << "  [INFO] avg pairwise dist — cosine sort: " << cosine_diversity
+              << "  adaptive MMR: " << mmr_diversity << "\n";
+
+    CHECK(mmr_diversity >= cosine_diversity,
+          "high-decay MMR produces more diverse results than cosine sort");
+
+    std::cout << "  [INFO] sample user: " << uid << "\n";
+    std::cout << "  [INFO] candidates:  " << candidates.size() << "\n";
+    std::cout << "  [INFO] cosine top-1 row: " << cosine_results[0].row
+              << "  score: " << cosine_results[0].score << "\n";
+    std::cout << "  [INFO] MMR    top-1 row: " << mmr_results[0].row
+              << "  score: " << mmr_results[0].score << "\n";
+}
+
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
@@ -589,6 +689,10 @@ int main() {
     // KD Tree
     KDTree tree(embeddings);
     test_kdtree(embeddings, user_embeddings, asin_to_idx);
+
+    // Ranker
+    Ranker ranker(embeddings);
+    test_ranker(embeddings, user_embeddings, tree);
 
     // ── Summary ────────────────────────────────────────────────────────────
     std::cout << "\n══════════════════════════════════════\n";

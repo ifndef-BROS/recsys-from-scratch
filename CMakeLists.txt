@@ -10,6 +10,7 @@ add_executable(
     src/retrieval/bloom_filter.cpp
     src/retrieval/kdtree.cpp 
     src/embeddings/user_embedding.cpp
+    src/ranking/ranker.cpp
 )
 
 target_include_directories(main PRIVATE include)
