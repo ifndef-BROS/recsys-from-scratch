@@ -1,4 +1,4 @@
 ## Readme
-- [ ] Add a project structure section in readme (tree output)
-- [ ] Results section
-- [ ] Proper References Section
+- [x] Add a project structure section in readme (tree output)
+- [x] Results section
+- [x] Proper References Section

@@ -303,3 +303,29 @@ Method            Recall@10    NDCG@10     MRR@10     Coverage
 popularity         0.065016   0.031509   0.021507       0.01%
 cosine_sort        0.016846   0.008808   0.006392      19.46%
 adaptive_mmr       0.011798   0.007240   0.005804      37.28%
+
+- After PCA
+[pipeline] inferred 146900 / 146980  (48.6821s  3017.54 users/s)
+[pipeline] done.  processed=146980  skipped=0  time=48.8128s  avg=0.332105ms/user
+════════════════════════════════════════════════════════════════════
+  Summary @ K=10
+════════════════════════════════════════════════════════════════════
+Method            Recall@10    NDCG@10     MRR@10     Coverage
+────────────────────────────────────────────────────────────────────
+popularity         0.065016   0.031509   0.021507       0.01%
+cosine_sort        0.014594   0.007253   0.005055      17.16%
+adaptive_mmr       0.008090   0.004985   0.004008      26.37%
+
+- Changing rewards from [0.2, 0.4, 0.6, 0.8, 1.0] to [-2, -1, 0, 1, 2]
+  - I did that because I want to peanlize the bad recommendations for a specific user and negative weights changed the user vector to spread out more to the negtive sides of the vector space leading to a massive increase in coverage
+[pipeline] inferred 146900 / 146980  (56.8948s  2581.96 users/s)
+[pipeline] done.  processed=146742  skipped=238  time=57.0374s  avg=0.388692ms/user
+════════════════════════════════════════════════════════════════════
+  Summary @ K=10
+════════════════════════════════════════════════════════════════════
+Method            Recall@10    NDCG@10     MRR@10     Coverage
+────────────────────────────────────────────────────────────────────
+popularity         0.065016   0.031509   0.021507       0.01%
+cosine_sort        0.012430   0.006271   0.004425      70.42%
+adaptive_mmr       0.006692   0.004259   0.003492      81.18%
+

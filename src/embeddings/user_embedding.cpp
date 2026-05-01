@@ -74,7 +74,8 @@ embedding_t compute_user_embedding(
         // Weight = rating / 5.0 → maps [1, 5] to [0.2, 1.0]
         // A 1-star review still contributes — it places the user
         // near that item's region, but with less conviction than 5 stars.
-        float weight = interaction.rating / 5.0f;
+        // float weight = interaction.rating / 5.0f;
+        float weight = interaction.rating - 3.0f;  
         int   row    = it->second;
 
         for (int d = 0; d < DIM; d++)
@@ -89,8 +90,15 @@ embedding_t compute_user_embedding(
 
     // Normalise by total weight to get weighted average
     // (not just weighted sum — scale matters for normalisation)
-    if (total_weight > 1e-9f)
-        for (float& v : user_vector) v /= total_weight;
+    float abs_weight = 0.0f;
+    for (const auto& inter : history) {
+        auto it = asin_to_idx.find(inter.asin);
+        if (it == asin_to_idx.end()) continue;
+        abs_weight += std::abs(inter.rating - 3.0f);
+    }
+
+    if (abs_weight > 1e-9f)
+        for (float& v : user_vector) v /= abs_weight;
 
     l2_normalize(user_vector);
     return user_vector;

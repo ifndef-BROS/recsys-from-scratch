@@ -48,7 +48,7 @@ using std::vector,
  * Set to 64 if PCA compression was applied in 04_item_embedding.py.
  * This value must be consistent with the CSV produced by the Python pipeline.
  */
-constexpr int DIM = 384;
+constexpr int DIM = 64;
 
 /**
  * @brief A single rated interaction between a user and an item.
