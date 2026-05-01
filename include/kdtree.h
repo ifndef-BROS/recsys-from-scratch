@@ -83,6 +83,32 @@ struct KNNComparator {
  *
  * Avoids sqrt — valid for comparison since sqrt is monotonically increasing.
  */
+#ifdef __AVX2__
+#include <immintrin.h>
+
+inline float squared_l2(const embedding_t& a, const embedding_t& b) {
+    __m256 sum = _mm256_setzero_ps();
+    const float* pa = a.data();
+    const float* pb = b.data();
+
+    // Process 8 floats at a time — DIM=384 is divisible by 8
+    for (int d = 0; d < DIM; d += 8) {
+        __m256 va   = _mm256_loadu_ps(pa + d);
+        __m256 vb   = _mm256_loadu_ps(pb + d);
+        __m256 diff = _mm256_sub_ps(va, vb);
+        sum         = _mm256_fmadd_ps(diff, diff, sum);  // sum += diff * diff
+    }
+
+    // Horizontal sum of 8 lanes
+    __m128 lo  = _mm256_castps256_ps128(sum);
+    __m128 hi  = _mm256_extractf128_ps(sum, 1);
+    __m128 s   = _mm_add_ps(lo, hi);
+    s          = _mm_hadd_ps(s, s);
+    s          = _mm_hadd_ps(s, s);
+    return _mm_cvtss_f32(s);
+}
+#else
+// fallback
 inline float squared_l2(const embedding_t& a, const embedding_t& b) {
     float dist = 0.0f;
     for (int d = 0; d < DIM; d++) {
@@ -91,6 +117,7 @@ inline float squared_l2(const embedding_t& a, const embedding_t& b) {
     }
     return dist;
 }
+#endif
 
 /**
  * @brief KD-tree over the item embedding matrix.

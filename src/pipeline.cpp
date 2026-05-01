@@ -110,8 +110,8 @@ void Pipeline::all_users(
 
         ++processed;
 
-        // Progress every 10K users
-        if (processed % 10000 == 0) {
+        // Progress every 100 users
+        if (processed % 100 == 0) {
             auto elapsed = chrono::steady_clock::now() - t_start;
             float secs   = chrono::duration<float>(elapsed).count();
             cout << "[pipeline] " << processed << " / " << total

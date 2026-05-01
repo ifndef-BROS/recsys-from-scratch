@@ -16,6 +16,7 @@
 #include "config.h"
 
 #include <iostream>
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <string>
@@ -655,7 +656,7 @@ int main(int argc, char* argv[]) {
         std::string user_id = argv[2];
 
         PipelineConfig cfg;
-        cfg.candidate_pool = 500;
+        cfg.candidate_pool = 100;
         cfg.top_k          = 10;
         cfg.mmr            = {1.0f, 0.2f};
 

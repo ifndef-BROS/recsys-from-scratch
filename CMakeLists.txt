@@ -14,4 +14,5 @@ add_executable(
     src/pipeline.cpp
 )
 
+target_compile_options(main PRIVATE -O3 -march=native -mavx2 -mfma)
 target_include_directories(main PRIVATE include)
