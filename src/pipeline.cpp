@@ -18,8 +18,10 @@
 #include <fstream>
 #include <iostream>
 #include <chrono>
+#include <atomic>
 
 using namespace std;
+
 
 Pipeline::Pipeline(
     const vector<embedding_t>&                                  embeddings,
@@ -74,7 +76,7 @@ void Pipeline::all_users(
     if (!mmr_f.is_open())
         throw runtime_error("Cannot open: " + mmr_out_path);
 
-    // Header: user_id, rec_1, rec_2, ..., rec_K
+    // Header
     cosine_f << "user_id";
     mmr_f    << "user_id";
     for (int i = 1; i <= config_.top_k; i++) {
@@ -84,50 +86,60 @@ void Pipeline::all_users(
     cosine_f << "\n";
     mmr_f    << "\n";
 
-    int processed  = 0;
-    int skipped    = 0;
-    int total      = static_cast<int>(ground_truth.size());
+    // Collect user ids into vector — needed for OpenMP indexed loop
+    vector<string> user_ids;
+    user_ids.reserve(ground_truth.size());
+    for (auto& [uid, _] : ground_truth)
+        user_ids.push_back(uid);
 
+    int total = static_cast<int>(user_ids.size());
+
+    // Parallel inference — each user is independent
+    vector<UserRecommendations> all_recs(total);
+
+    atomic<int> inference_done{0};
     auto t_start = chrono::steady_clock::now();
 
-    for (const auto& [user_id, gt_asin] : ground_truth) {
-        auto recs = infer(user_id);
+    #pragma omp parallel for schedule(dynamic, 10)
+    for (int i = 0; i < total; i++) {
+        all_recs[i] = infer(user_ids[i]);
 
-        if (recs.cosine_asins.empty()) {
-            ++skipped;
-            continue;
+        int done = ++inference_done;
+        if (done % 100 == 0) {
+            auto elapsed = std::chrono::steady_clock::now() - t_start;
+            float secs   = std::chrono::duration<float>(elapsed).count();
+            std::cerr << "[pipeline] inferred " << done << " / " << total
+                    << "  (" << secs << "s  "
+                    << static_cast<float>(done) / secs << " users/s)\n";
         }
+    }
 
-        // Write cosine results
-        cosine_f << user_id;
+    // Serial write — file I/O cannot be parallelised
+    int processed = 0;
+    int skipped   = 0;
+
+    for (auto& recs : all_recs) {
+        if (recs.cosine_asins.empty()) { ++skipped; continue; }
+
+        cosine_f << recs.user_id;
         for (auto& asin : recs.cosine_asins) cosine_f << "," << asin;
         cosine_f << "\n";
 
-        // Write MMR results
-        mmr_f << user_id;
+        mmr_f << recs.user_id;
         for (auto& asin : recs.mmr_asins) mmr_f << "," << asin;
         mmr_f << "\n";
 
         ++processed;
-
-        // Progress every 100 users
-        if (processed % 100 == 0) {
-            auto elapsed = chrono::steady_clock::now() - t_start;
-            float secs   = chrono::duration<float>(elapsed).count();
-            cout << "[pipeline] " << processed << " / " << total
-                      << "  (" << secs << "s  "
-                      << static_cast<float>(processed) / secs << " users/s)\n";
-        }
     }
 
-    auto elapsed = chrono::steady_clock::now() - t_start;
-    float secs   = chrono::duration<float>(elapsed).count();
+    auto elapsed = std::chrono::steady_clock::now() - t_start;
+    float secs   = std::chrono::duration<float>(elapsed).count();
 
     cout << "[pipeline] done."
-              << "  processed=" << processed
-              << "  skipped="   << skipped
-              << "  time="      << secs << "s"
-              << "  avg="       << secs / processed * 1000.0f << "ms/user\n";
+            << "  processed=" << processed
+            << "  skipped="   << skipped
+            << "  time="      << secs << "s"
+            << "  avg="       << (processed > 0 ? secs / processed * 1000.0f : 0.0f) << "ms/user\n";
 }
 
 UserRecommendations Pipeline::infer(const string& user_id) const {

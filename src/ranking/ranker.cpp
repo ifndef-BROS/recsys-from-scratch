@@ -143,6 +143,10 @@ vector<RankedItem> Ranker::adaptive_mmr(
 
 float Ranker::dot(const embedding_t& a, const embedding_t& b) const {
     float sum = 0.0f;
+    
+    // Force the CPU to calculate 8 to 16 dimensions simultaneously 
+    // using AVX hardware registers.
+    #pragma omp simd reduction(+:sum)
     for (int d = 0; d < DIM; d++)
         sum += a[d] * b[d];
     return sum;
